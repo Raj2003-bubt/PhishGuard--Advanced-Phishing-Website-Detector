@@ -8,9 +8,9 @@ from datetime import datetime, timezone
 from urllib.parse import urlparse, urljoin
 
 import requests
-import urllib3
 import tldextract
 from bs4 import BeautifulSoup
+from security_checks import normalize_url, is_valid_url, ensure_public_target
 
 import customtkinter as ctk
 from tkinter import StringVar
@@ -22,7 +22,6 @@ try:
 except Exception:
     HAS_WHOIS = False
 
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # ── THEME ──────────────────────────────────────────────────────────────────
 ctk.set_appearance_mode("dark")
@@ -86,19 +85,6 @@ HEADERS = {
 SAFE_THRESHOLD = 25
 WARN_THRESHOLD = 55
 
-
-def normalize_url(url):
-    url = url.strip()
-    if not re.match(r"^https?://", url, re.IGNORECASE):
-        url = "https://" + url
-    return url
-
-def is_valid_url(url):
-    try:
-        p = urlparse(url)
-        return bool(p.scheme and p.netloc)
-    except Exception:
-        return False
 
 def host_from_url(url):
     try:
@@ -174,19 +160,39 @@ def check_domain_age(hostname):
         return None
 
 def fetch_site(url):
+    """Fetch public HTTP(S) pages without ignoring invalid TLS certificates.
+
+    Redirect hops are validated one at a time. This does not fully prevent DNS
+    rebinding; the tool must be used locally, not exposed as a scan-as-a-service.
+    """
     pre = []
-    try:
-        r = requests.get(url, headers=HEADERS, timeout=10, allow_redirects=True)
-        return r, pre, None
-    except requests.exceptions.SSLError:
-        add_finding(pre, "danger", "HTTPS / SSL", "SSL validation failed on connect.", 20)
+    current_url = url
+    history = []
+    for _ in range(6):  # Initial request plus up to five redirects.
         try:
-            r = requests.get(url, headers=HEADERS, timeout=10, allow_redirects=True, verify=False)
-            return r, pre, None
-        except Exception as e:
-            return None, pre, str(e)
-    except Exception as e:
-        return None, pre, str(e)
+            ensure_public_target(current_url)
+        except ValueError as exc:
+            return None, pre, str(exc)
+        try:
+            response = requests.get(
+                current_url, headers=HEADERS, timeout=10, allow_redirects=False
+            )
+        except requests.exceptions.SSLError:
+            add_finding(pre, "danger", "HTTPS / SSL", "TLS certificate validation failed.", 20)
+            return None, pre, "TLS certificate validation failed; request was not retried insecurely."
+        except requests.exceptions.RequestException as exc:
+            return None, pre, str(exc)
+
+        location = response.headers.get("Location")
+        if response.is_redirect and location:
+            history.append(response)
+            if len(history) > 5:
+                return None, pre, "Redirect limit exceeded (5 hops)."
+            current_url = urljoin(current_url, location)
+            continue
+        response.history = history
+        return response, pre, None
+    return None, pre, "Redirect limit exceeded."
 
 def analyze_static(url, findings):
     hostname = host_from_url(url)
@@ -259,12 +265,11 @@ def analyze_static(url, findings):
         try:
             ipaddress.ip_address(hostname)
             is_ip = True
-        except Exception:
+        except ValueError:
             is_ip = False
-
-    if not is_ip:
-        s, d, p = check_ssl_certificate(hostname)
-        add_finding(findings, s, "SSL Certificate", d, p)
+        if not is_ip:
+            status, detail, points = check_ssl_certificate(hostname)
+            add_finding(findings, status, "SSL Certificate", detail, points)
 
     age = check_domain_age(hostname)
     if age:
@@ -357,13 +362,22 @@ def calculate_score(findings):
 
 def risk_label(score):
     if score < SAFE_THRESHOLD:
-        return "SAFE", C_GREEN
+        return "LOW RISK", C_GREEN
     if score < WARN_THRESHOLD:
         return "SUSPICIOUS", C_YELLOW
     return "HIGH RISK", C_RED
 
 def run_analysis(url):
     findings = []
+    try:
+        ensure_public_target(url)
+    except ValueError as exc:
+        add_finding(findings, "danger", "Scan Blocked", str(exc), 100)
+        return {
+            "url": url, "host": host_from_url(url), "domain": registrable_domain(url),
+            "score": 100, "label": "BLOCKED", "color": C_RED,
+            "findings": findings, "danger": 1, "warning": 0, "safe": 0,
+        }
     analyze_static(url, findings)
     response, pre, error = fetch_site(url)
     findings.extend(pre)
@@ -691,8 +705,8 @@ class PhishGuardApp(ctk.CTk):
         self.welcome_placeholder.grid_remove()
         self.col_header.grid_remove()
         # Clear old findings
-        for w in self._all_finding_rows:
-            w.destroy()
+        for row, _ in self._all_finding_rows:
+            row.destroy()
         self._all_finding_rows = []
 
         self.loader_frame.grid(row=0, column=0)
@@ -706,7 +720,7 @@ class PhishGuardApp(ctk.CTk):
         self.left_results.grid(row=0, column=0, sticky="nsew", padx=0, pady=0)
         self.left_results.tkraise()
 
-        icon = "✔" if r['label'] == "SAFE" else ("⚠" if r['label'] == "SUSPICIOUS" else "✖")
+        icon = "✔" if r['label'] == "LOW RISK" else ("⚠" if r['label'] == "SUSPICIOUS" else "✖")
         self.verdict_icon_lbl.configure(text=icon, text_color=r['color'])
         self.verdict_lbl.configure(text=r['label'], text_color=r['color'])
         self.verdict_frame.configure(fg_color=C_BG2)
@@ -819,7 +833,7 @@ class PhishGuardApp(ctk.CTk):
                                         text_color=C_TEXT_DIM, anchor="w")
         self.status_lbl.grid(row=0, column=0, padx=16, pady=5, sticky="w")
 
-        ctk.CTkLabel(bar, text="PhishGuard v2.0  ·  Neural Threat Engine",
+        ctk.CTkLabel(bar, text="PhishGuard  ·  Heuristic Threat Checks",
                      font=("Courier New", 10), text_color=C_TEXT_DIM).grid(
             row=0, column=1, padx=16, pady=5)
 
