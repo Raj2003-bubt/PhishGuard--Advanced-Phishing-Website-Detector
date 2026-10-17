@@ -84,6 +84,7 @@ HEADERS = {
 }
 SAFE_THRESHOLD = 25
 WARN_THRESHOLD = 55
+MAX_RESPONSE_BYTES = 2 * 1024 * 1024  # Limit decoded HTML to 2 MiB.
 
 
 def host_from_url(url):
@@ -117,10 +118,10 @@ def dns_resolves(hostname):
     except Exception:
         return False
 
-def check_ssl_certificate(hostname):
+def check_ssl_certificate(hostname, port=443):
     try:
         ctx = ssl.create_default_context()
-        with socket.create_connection((hostname, 443), timeout=5) as sock:
+        with socket.create_connection((hostname, port), timeout=5) as sock:
             with ctx.wrap_socket(sock, server_hostname=hostname) as ssock:
                 cert = ssock.getpeercert()
                 not_after = cert.get("notAfter")
@@ -175,7 +176,8 @@ def fetch_site(url):
             return None, pre, str(exc)
         try:
             response = requests.get(
-                current_url, headers=HEADERS, timeout=10, allow_redirects=False
+                current_url, headers=HEADERS, timeout=10, allow_redirects=False,
+                stream=True,
             )
         except requests.exceptions.SSLError:
             add_finding(pre, "danger", "HTTPS / SSL", "TLS certificate validation failed.", 20)
@@ -186,10 +188,25 @@ def fetch_site(url):
         location = response.headers.get("Location")
         if response.is_redirect and location:
             history.append(response)
+            response.close()
             if len(history) > 5:
                 return None, pre, "Redirect limit exceeded (5 hops)."
             current_url = urljoin(current_url, location)
             continue
+        try:
+            chunks = []
+            total = 0
+            for chunk in response.iter_content(chunk_size=64 * 1024):
+                total += len(chunk)
+                if total > MAX_RESPONSE_BYTES:
+                    return None, pre, "Response exceeds the 2 MiB analysis limit."
+                chunks.append(chunk)
+            response._content = b"".join(chunks)
+            response._content_consumed = True
+        except requests.exceptions.RequestException as exc:
+            return None, pre, str(exc)
+        finally:
+            response.close()
         response.history = history
         return response, pre, None
     return None, pre, "Redirect limit exceeded."
@@ -268,7 +285,7 @@ def analyze_static(url, findings):
         except ValueError:
             is_ip = False
         if not is_ip:
-            status, detail, points = check_ssl_certificate(hostname)
+            status, detail, points = check_ssl_certificate(hostname, urlparse(url).port or 443)
             add_finding(findings, status, "SSL Certificate", detail, points)
 
     age = check_domain_age(hostname)
