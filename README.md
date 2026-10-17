@@ -1,55 +1,87 @@
 # PhishGuard — Heuristic Phishing Website Analyzer
 
-A Python desktop proof of concept for examining URLs and page features associated with phishing risk. The CustomTkinter GUI displays a heuristic risk score and the individual checks that contributed to it.
+**Inspect the signals behind a website-risk assessment.**
 
-> **Important:** This is a rule-based educational tool, **not an AI/ML model**, a verified malware scanner, or a guarantee that a website is safe. A low score does not mean that a website is trustworthy. Do not open links or enter credentials based only on this result.
+[![Python security checks](https://github.com/Raj2003-bubt/PhishGuard--Advanced-Phishing-Website-Detector/actions/workflows/python-tests.yml/badge.svg)](https://github.com/Raj2003-bubt/PhishGuard--Advanced-Phishing-Website-Detector/actions/workflows/python-tests.yml)
 
-## Features
+PhishGuard is a personal Python desktop project that examines URLs and returned webpages for heuristic phishing-risk indicators. Its CustomTkinter interface displays individual findings, severity counts, and a capped score so users can inspect which rules influenced the result.
 
-- URL signals: suspicious characters, length, IP/domain structure and keywords
-- DNS and TLS certificate checks on relevant hosts
-- Optional HTTP(S) fetch, redirect and page-content heuristics
-- Findings panel with severity and score breakdown
-- Asynchronous scanning to keep the desktop GUI responsive
-- Refuses local/private targets as a basic risk reduction measure
+## Problem and motivation
 
-## Stack
+A familiar-looking domain, a login form, or a valid HTTPS certificate alone cannot establish trust. PhishGuard makes common warning signals visible in an educational interface while demonstrating network programming, HTML parsing, defensive input handling, and asynchronous desktop application design.
 
-Python 3.9+, CustomTkinter, Requests, BeautifulSoup, tldextract, python-whois (optional at runtime).
+**A finding is not proof of phishing; a low score is not proof of safety.** There is no validated detection-accuracy claim. This tool does not replace browser protections or professional security software.
 
-## Run locally
+## Implemented checks
+
+| Stage | Source-supported analysis |
+|---|---|
+| URL | Scheme, length, direct IP, subdomains, keywords, shortening domains, punycode, encoded characters, unusual ports, digits, and configured TLD indicators |
+| Host | DNS resolution, TLS certificate validation/expiry for domain-based HTTPS URLs, and optional WHOIS creation dates |
+| HTTP | Up to five redirects, destination-domain changes, status, content type, and a 2 MiB decoded response limit |
+| HTML | Password fields, external/empty/JavaScript form actions, hidden iframes, configured urgency phrases, script patterns, and external script counts |
+| Results | Point breakdown, severity filters, and LOW RISK / SUSPICIOUS / HIGH RISK labels |
+
+Rules contribute manually chosen points. Scores are capped at 100, with label thresholds at 25 and 55; these are not probabilities. Legitimate pages can trigger rules.
+
+## Technology and workflow
+
+**Python 3.9+ · CustomTkinter/Tk · Requests · BeautifulSoup · tldextract · python-whois**
+
+1. Normalize and validate the entered HTTP(S) URL.
+2. Reject local/private targets before analysis.
+3. Run URL, host, HTTP, and HTML checks in a worker thread.
+4. Score findings and update the desktop results panel.
+
+`app.py` contains the GUI and analysis; `security_checks.py` isolates URL/public-address checks; `tests/test_security_checks.py` uses mocked DNS. The public-suffix extractor uses its bundled snapshot at initialization. A requested scan contacts external services.
+
+## Install and run
 
 ```bash
+git clone https://github.com/Raj2003-bubt/PhishGuard--Advanced-Phishing-Website-Detector.git
+cd PhishGuard--Advanced-Phishing-Website-Detector
 python -m venv .venv
-# Windows PowerShell
-.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
+```
+
+Activate with `.venv\Scripts\Activate.ps1` in Windows PowerShell, or `source .venv/bin/activate` on macOS/Linux. Then:
+
+```bash
+python -m pip install -r requirements.txt
 python app.py
 ```
 
-For macOS/Linux activate with `source .venv/bin/activate` instead. GUI requires a graphical desktop and active internet connection for external checks.
+A graphical desktop and Tk support are required. Some Linux distributions package Tk separately. External checks need internet access; WHOIS may be missing, rate-limited, or unavailable. Scan only URLs you are authorized to contact.
 
-## Offline tests
+## Verification
 
 ```bash
+python -m compileall -q app.py security_checks.py
 python -m unittest discover -s tests -v
 ```
 
-These tests cover input/target safety checks, **not** accuracy against a labeled phishing benchmark. Full GUI and live-network validation were not performed in this packaging pass.
+All 17 offline tests pass in the portfolio audit. They cover URL/public-target checks plus bounded response reading, interrupted streams, blocked redirects, redirect limits, TLS failure handling, and custom HTTPS ports. HTTP, DNS, TLS, and WHOIS are mocked where used; tests do not scan websites. Install application dependencies before running the expanded suite. Compilation does not launch the GUI.
 
-## Security and limitations
+GitHub Actions runs these checks independently. This suite does not measure phishing accuracy, exercise the full GUI, or validate every live-network/error path.
 
-- Use **only URLs you are authorized to test**. Fetching untrusted sites still involves some risk.
-- TLS verification is not bypassed when an HTTPS certificate fails.
-- Non-public IPs and explicit local hostnames are blocked before requests and at redirect hops. **DNS rebinding is not fully prevented** because DNS validation and connection occur separately; do not deploy this local desktop scanner as an open web API.
-- Scores are **hand-designed heuristics**, not statistically calibrated probabilities or validated accuracy metrics.
-- Page content analysis can produce false positives and false negatives. Some sites may block automated requests.
-- Avoid scanning suspicious URLs containing personal tokens or credentials in query strings.
+## Screenshots
+
+No application screenshot is currently committed. Captures of the actual desktop interface and an authorized scan remain a documentation task; no simulated screenshot is presented as evidence.
+
+## Security boundaries and limitations
+
+- Accepts HTTP(S) without embedded credentials; checks for non-public addresses initially and at redirect hops.
+- Keeps HTTPS verification enabled; certificate errors are not retried insecurely.
+- DNS validation and connection are separate, leaving a DNS-rebinding gap. Keep this a local desktop tool, not a public scan API.
+- Decoded response bodies are limited to 2 MiB and response streams are closed after use. Larger pages are not analyzed; the cap is not a total process-memory guarantee.
+- Certificate checks use the selected HTTPS port. DNS checks and later connections are still separate operations.
+- HTML is parsed without executing JavaScript, so dynamic content can be missed.
+- TLS, domain age, keywords, and page structure are imperfect signals; false positives/negatives are expected.
+- Avoid URLs containing private tokens. The target receives the request, and DNS/WHOIS infrastructure may receive lookups.
+
+Future work includes stronger connection-level target binding, end-to-end scan time limits, real GUI captures, and evaluation against a responsibly obtained labeled dataset. These are not current capabilities.
 
 ## Author and provenance
 
-**Project type:** Personal project. **Role:** Sole Developer (Raj2003-bubt), as stated by the developer.
+Personal project by **Raj2003-bubt**, described by the owner as their implementation. Earlier hosting is preserved through the fork relationship with [Sakib-183/PhishGuard--Advanced-Phishing-Website-Detector](https://github.com/Sakib-183/PhishGuard--Advanced-Phishing-Website-Detector); hosting location alone does not establish co-authorship. Original history and attribution remain intact.
 
-The project's earlier source was hosted in [Sakib-183/PhishGuard--Advanced-Phishing-Website-Detector](https://github.com/Sakib-183/PhishGuard--Advanced-Phishing-Website-Detector); this portfolio repository remains a fork to preserve transparent GitHub history. The current portfolio version also includes documentation, tests, and defensive code improvements. The upstream hosting location is not itself a claim of co-authorship.
-
-**License:** No new license is asserted in this repository; obtain appropriate permission before reusing or redistributing third-party components.
+No new license is asserted. Check applicable rights and third-party dependency licenses before redistribution.
