@@ -10,7 +10,7 @@ PhishGuard is a personal Python desktop project that examines URLs and returned 
 
 A familiar-looking domain, a login form, or a valid HTTPS certificate alone cannot establish trust. PhishGuard makes common warning signals visible in an educational interface while demonstrating network programming, HTML parsing, defensive input handling, and asynchronous desktop application design.
 
-**A finding is not proof of phishing; a low score is not proof of safety.** There is no validated detection-accuracy claim. This tool does not replace browser protections or professional security software.
+**A finding is not proof of phishing; a low score is not proof of safety. Failed fetches, HTTP error pages and unsupported non-HTML responses are labelled INCOMPLETE rather than LOW RISK.** There is no validated detection-accuracy claim. This tool does not replace browser protections or professional security software.
 
 ## Implemented checks
 
@@ -46,6 +46,7 @@ python -m venv .venv
 Activate with `.venv\Scripts\Activate.ps1` in Windows PowerShell, or `source .venv/bin/activate` on macOS/Linux. Then:
 
 ```bash
+python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 python app.py
 ```
@@ -59,7 +60,7 @@ python -m compileall -q app.py security_checks.py
 python -m unittest discover -s tests -v
 ```
 
-All 17 offline tests pass in the portfolio audit. They cover URL/public-target checks plus bounded response reading, interrupted streams, blocked redirects, redirect limits, TLS failure handling, and custom HTTPS ports. HTTP, DNS, TLS, and WHOIS are mocked where used; tests do not scan websites. Install application dependencies before running the expanded suite. Compilation does not launch the GUI.
+All 22 offline tests pass in the November portfolio audit. They cover URL/public-target checks plus bounded response reading, interrupted streams, blocked redirects, redirect limits, TLS failure handling, and custom HTTPS ports. HTTP, DNS, TLS, and WHOIS are mocked where used; tests do not scan websites. Install application dependencies before running the expanded suite. Compilation does not launch the GUI.
 
 GitHub Actions runs these checks independently. This suite does not measure phishing accuracy, exercise the full GUI, or validate every live-network/error path.
 
