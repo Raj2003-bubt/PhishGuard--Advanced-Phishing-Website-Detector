@@ -405,6 +405,10 @@ def run_analysis(url):
         url = response.url
     score = calculate_score(findings)
     label, color = risk_label(score)
+    # A partial scan cannot support a reassuring verdict, even with few URL findings.
+    if (response is None or response.status_code >= 400
+            or "text/html" not in response.headers.get("content-type", "").lower()):
+        label, color = "INCOMPLETE", C_YELLOW
     hostname = host_from_url(url)
     domain = registrable_domain(url)
     return {
@@ -700,7 +704,8 @@ class PhishGuardApp(ctk.CTk):
         self._stop_loader_anim = True
         self._show_results(result)
         self.scan_btn.configure(state="normal", text="▶  SCAN")
-        self._set_status(f"Scan complete  ·  Score: {result['score']}/100  ·  {result['label']}", result['color'])
+        completion = "Scan incomplete" if result["label"] == "INCOMPLETE" else "Scan complete"
+        self._set_status(f"{completion}  ·  Score: {result['score']}/100  ·  {result['label']}", result['color'])
 
     def _animate_loader(self, step):
         steps = [
@@ -737,7 +742,7 @@ class PhishGuardApp(ctk.CTk):
         self.left_results.grid(row=0, column=0, sticky="nsew", padx=0, pady=0)
         self.left_results.tkraise()
 
-        icon = "✔" if r['label'] == "LOW RISK" else ("⚠" if r['label'] == "SUSPICIOUS" else "✖")
+        icon = "✔" if r['label'] == "LOW RISK" else ("⚠" if r['label'] in {"SUSPICIOUS", "INCOMPLETE"} else "✖")
         self.verdict_icon_lbl.configure(text=icon, text_color=r['color'])
         self.verdict_lbl.configure(text=r['label'], text_color=r['color'])
         self.verdict_frame.configure(fg_color=C_BG2)
